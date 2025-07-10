@@ -1,10 +1,11 @@
+// Enhanced Authentication Context with proper error handling
+// File: src/contexts/AuthContext.jsx
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { authAPI } from '../lib/api';
 
-// Create Auth Context
 const AuthContext = createContext();
 
-// Custom hook to use auth context
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -13,46 +14,71 @@ export const useAuth = () => {
   return context;
 };
 
-// Auth Provider Component
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Check if user is authenticated on app load
+  // Clear error after 5 seconds
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => {
+        setError(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
+
+  // Check if user is logged in on app start
   useEffect(() => {
     checkAuthStatus();
   }, []);
 
   const checkAuthStatus = async () => {
     try {
-      if (authAPI.isAuthenticated()) {
-        const userData = await authAPI.getCurrentUser();
-        setUser(userData);
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      const result = await authAPI.getCurrentUser();
+      if (result.success) {
+        setUser(result.data);
+      } else {
+        // Token might be expired, clear it
+        localStorage.removeItem('access_token');
+        setUser(null);
       }
     } catch (error) {
       console.error('Auth check failed:', error);
-      authAPI.logout();
+      localStorage.removeItem('access_token');
+      setUser(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const login = async (email, password) => {
+  const login = async (credentials) => {
     try {
       setLoading(true);
       setError(null);
+
+      const result = await authAPI.login(credentials);
       
-      const response = await authAPI.login(email, password);
-      
-      // Get user data after successful login
-      const userData = await authAPI.getCurrentUser();
-      setUser(userData);
-      
-      return response;
+      if (result.success) {
+        setUser(result.data.user);
+        setError(null);
+        return { success: true, message: result.message };
+      } else {
+        const errorMessage = result.error || 'Login failed. Please try again.';
+        setError(errorMessage);
+        return { success: false, error: errorMessage };
+      }
     } catch (error) {
-      setError(error.message);
-      throw error;
+      const errorMessage = error.message || 'An unexpected error occurred during login.';
+      setError(errorMessage);
+      return { success: false, error: errorMessage };
     } finally {
       setLoading(false);
     }
@@ -62,28 +88,52 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
+
+      const result = await authAPI.register(userData);
       
-      const response = await authAPI.register(userData);
-      
-      // Auto-login after registration
-      if (response.access_token) {
-        const userInfo = await authAPI.getCurrentUser();
-        setUser(userInfo);
+      if (result.success) {
+        // After successful registration, automatically log in
+        const loginResult = await authAPI.login({
+          username_or_email: userData.email,
+          password: userData.password
+        });
+        
+        if (loginResult.success) {
+          setUser(loginResult.data.user);
+        }
+        
+        setError(null);
+        return { success: true, message: result.message };
+      } else {
+        const errorMessage = result.error || 'Registration failed. Please try again.';
+        setError(errorMessage);
+        return { success: false, error: errorMessage };
       }
-      
-      return response;
     } catch (error) {
-      setError(error.message);
-      throw error;
+      const errorMessage = error.message || 'An unexpected error occurred during registration.';
+      setError(errorMessage);
+      return { success: false, error: errorMessage };
     } finally {
       setLoading(false);
     }
   };
 
-  const logout = () => {
-    authAPI.logout();
-    setUser(null);
-    setError(null);
+  const logout = async () => {
+    try {
+      setLoading(true);
+      await authAPI.logout();
+      setUser(null);
+      setError(null);
+      return { success: true, message: 'Logged out successfully' };
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Even if logout fails, clear local state
+      setUser(null);
+      setError(null);
+      return { success: true, message: 'Logged out successfully' };
+    } finally {
+      setLoading(false);
+    }
   };
 
   const clearError = () => {

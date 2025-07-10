@@ -1,271 +1,256 @@
-// API utility for RecruitAI backend integration
-const API_BASE_URL = 'https://cleanfilesbackend.onrender.com';
+// Enhanced API utility for RecruitAI backend integration
+// File: src/lib/api.js
 
-// API configuration
-const API_CONFIG = {
-  baseURL: API_BASE_URL,
-  timeout: 30000, // 30 seconds for cold starts
-  retries: 3,
-  retryDelay: 2000, // 2 seconds
-};
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://cleanfilesbackend.onrender.com';
 
-// Get auth token from localStorage
-const getAuthToken = () => {
-  return localStorage.getItem('recruitai_token');
-};
+// Enhanced error handling class
+class APIError extends Error {
+  constructor(message, status, data) {
+    super(message);
+    this.name = 'APIError';
+    this.status = status;
+    this.data = data;
+  }
+}
 
-// Set auth token in localStorage
-const setAuthToken = (token) => {
-  localStorage.setItem('recruitai_token', token);
-};
+// Enhanced API client with better error handling
+class APIClient {
+  constructor(baseURL = API_BASE_URL) {
+    this.baseURL = baseURL;
+    this.token = localStorage.getItem('access_token');
+  }
 
-// Remove auth token from localStorage
-const removeAuthToken = () => {
-  localStorage.removeItem('recruitai_token');
-};
-
-// Create headers with authentication
-const createHeaders = (includeAuth = true) => {
-  const headers = {
-    'Content-Type': 'application/json',
-  };
-
-  if (includeAuth) {
-    const token = getAuthToken();
+  // Set authentication token
+  setToken(token) {
+    this.token = token;
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+      localStorage.setItem('access_token', token);
+    } else {
+      localStorage.removeItem('access_token');
     }
   }
 
-  return headers;
-};
+  // Get authentication headers
+  getHeaders(contentType = 'application/json') {
+    const headers = {
+      'Content-Type': contentType,
+    };
 
-// Sleep utility for retries
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
 
-// Generic API call with retry logic
-const apiCall = async (endpoint, options = {}) => {
-  const url = `${API_CONFIG.baseURL}${endpoint}`;
-  const config = {
-    ...options,
-    headers: {
-      ...createHeaders(options.includeAuth !== false),
-      ...options.headers,
-    },
-  };
+    return headers;
+  }
 
-  for (let attempt = 1; attempt <= API_CONFIG.retries; attempt++) {
+  // Enhanced request method with better error handling
+  async request(endpoint, options = {}) {
+    const url = `${this.baseURL}${endpoint}`;
+    
+    const config = {
+      headers: this.getHeaders(),
+      ...options,
+    };
+
     try {
+      console.log(`Making ${config.method || 'GET'} request to:`, url);
+      
       const response = await fetch(url, config);
       
-      // Handle backend cold start (503/502 errors)
-      if ((response.status === 503 || response.status === 502) && attempt < API_CONFIG.retries) {
-        console.log(`Backend cold start detected, retrying... (${attempt}/${API_CONFIG.retries})`);
-        await sleep(API_CONFIG.retryDelay);
-        continue;
+      // Handle different response types
+      let data;
+      const contentType = response.headers.get('content-type');
+      
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        data = await response.text();
       }
 
-      // Handle authentication errors
-      if (response.status === 401) {
-        removeAuthToken();
-        window.location.href = '/login';
-        throw new Error('Authentication failed');
-      }
-
-      // Parse response
-      const data = await response.json();
+      console.log('Response status:', response.status);
+      console.log('Response data:', data);
 
       if (!response.ok) {
-        throw new Error(data.detail || data.message || `HTTP ${response.status}`);
+        // Extract error message from different response formats
+        let errorMessage = 'An error occurred';
+        
+        if (typeof data === 'object' && data !== null) {
+          if (data.detail) {
+            // FastAPI error format
+            if (typeof data.detail === 'string') {
+              errorMessage = data.detail;
+            } else if (Array.isArray(data.detail)) {
+              errorMessage = data.detail.map(err => err.msg || err.message).join(', ');
+            } else if (typeof data.detail === 'object') {
+              errorMessage = data.detail.message || JSON.stringify(data.detail);
+            }
+          } else if (data.message) {
+            errorMessage = data.message;
+          } else if (data.error) {
+            errorMessage = data.error;
+          } else {
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+          }
+        } else if (typeof data === 'string') {
+          errorMessage = data;
+        }
+
+        throw new APIError(errorMessage, response.status, data);
       }
 
       return data;
     } catch (error) {
-      console.error(`API call attempt ${attempt} failed:`, error);
+      console.error('API request failed:', error);
       
-      if (attempt === API_CONFIG.retries) {
+      if (error instanceof APIError) {
         throw error;
       }
       
-      await sleep(API_CONFIG.retryDelay);
+      // Handle network errors
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        throw new APIError('Network error. Please check your connection and try again.', 0, null);
+      }
+      
+      // Handle other errors
+      throw new APIError(error.message || 'An unexpected error occurred', 0, null);
+    }
+  }
+
+  // GET request
+  async get(endpoint) {
+    return this.request(endpoint, { method: 'GET' });
+  }
+
+  // POST request
+  async post(endpoint, data) {
+    return this.request(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // PUT request
+  async put(endpoint, data) {
+    return this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // DELETE request
+  async delete(endpoint) {
+    return this.request(endpoint, { method: 'DELETE' });
+  }
+}
+
+// Create API client instance
+const apiClient = new APIClient();
+
+// Authentication API functions
+export const authAPI = {
+  // User registration
+  async register(userData) {
+    try {
+      const response = await apiClient.post('/api/auth/register', userData);
+      return {
+        success: true,
+        data: response,
+        message: 'Registration successful!'
+      };
+    } catch (error) {
+      console.error('Registration error:', error);
+      return {
+        success: false,
+        error: error.message,
+        status: error.status
+      };
+    }
+  },
+
+  // User login
+  async login(credentials) {
+    try {
+      const response = await apiClient.post('/api/auth/login', credentials);
+      
+      if (response.access_token) {
+        apiClient.setToken(response.access_token);
+      }
+      
+      return {
+        success: true,
+        data: response,
+        message: 'Login successful!'
+      };
+    } catch (error) {
+      console.error('Login error:', error);
+      return {
+        success: false,
+        error: error.message,
+        status: error.status
+      };
+    }
+  },
+
+  // User logout
+  async logout() {
+    try {
+      apiClient.setToken(null);
+      return {
+        success: true,
+        message: 'Logged out successfully!'
+      };
+    } catch (error) {
+      console.error('Logout error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  },
+
+  // Get current user
+  async getCurrentUser() {
+    try {
+      const response = await apiClient.get('/api/auth/me');
+      return {
+        success: true,
+        data: response
+      };
+    } catch (error) {
+      console.error('Get current user error:', error);
+      return {
+        success: false,
+        error: error.message,
+        status: error.status
+      };
+    }
+  },
+
+  // Refresh token
+  async refreshToken() {
+    try {
+      const response = await apiClient.post('/api/auth/refresh');
+      
+      if (response.access_token) {
+        apiClient.setToken(response.access_token);
+      }
+      
+      return {
+        success: true,
+        data: response
+      };
+    } catch (error) {
+      console.error('Refresh token error:', error);
+      return {
+        success: false,
+        error: error.message,
+        status: error.status
+      };
     }
   }
 };
 
-// Authentication API calls
-export const authAPI = {
-  // Login user
-  login: async (email, password) => {
-    const response = await apiCall('/api/auth/login', {
-      method: 'POST',
-      includeAuth: false,
-      body: JSON.stringify({ email, password }),
-    });
-    
-    if (response.access_token) {
-      setAuthToken(response.access_token);
-    }
-    
-    return response;
-  },
-
-  // Register user
-  register: async (userData) => {
-    return await apiCall('/api/auth/register', {
-      method: 'POST',
-      includeAuth: false,
-      body: JSON.stringify(userData),
-    });
-  },
-
-  // Refresh token
-  refresh: async () => {
-    return await apiCall('/api/auth/refresh', {
-      method: 'POST',
-    });
-  },
-
-  // Logout user
-  logout: () => {
-    removeAuthToken();
-  },
-
-  // Check if user is authenticated
-  isAuthenticated: () => {
-    return !!getAuthToken();
-  },
-
-  // Get current user
-  getCurrentUser: async () => {
-    return await apiCall('/api/auth/me');
-  },
-};
-
-// Jobs API calls
-export const jobsAPI = {
-  // Get all jobs
-  getAll: async () => {
-    return await apiCall('/api/jobs/');
-  },
-
-  // Get job by ID
-  getById: async (id) => {
-    return await apiCall(`/api/jobs/${id}`);
-  },
-
-  // Create new job
-  create: async (jobData) => {
-    return await apiCall('/api/jobs/', {
-      method: 'POST',
-      body: JSON.stringify(jobData),
-    });
-  },
-
-  // Update job
-  update: async (id, jobData) => {
-    return await apiCall(`/api/jobs/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(jobData),
-    });
-  },
-
-  // Delete job
-  delete: async (id) => {
-    return await apiCall(`/api/jobs/${id}`, {
-      method: 'DELETE',
-    });
-  },
-};
-
-// Resumes API calls
-export const resumesAPI = {
-  // Upload resume
-  upload: async (file, jobId = null) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (jobId) {
-      formData.append('job_id', jobId);
-    }
-
-    return await apiCall('/api/resumes/upload', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${getAuthToken()}`,
-        // Don't set Content-Type for FormData
-      },
-      body: formData,
-    });
-  },
-
-  // Get all resumes
-  getAll: async () => {
-    return await apiCall('/api/resumes/');
-  },
-
-  // Get resume by ID
-  getById: async (id) => {
-    return await apiCall(`/api/resumes/${id}`);
-  },
-
-  // Match resume with job
-  match: async (resumeId, jobId) => {
-    return await apiCall('/api/resumes/match', {
-      method: 'POST',
-      body: JSON.stringify({ resume_id: resumeId, job_id: jobId }),
-    });
-  },
-
-  // Analyze resume
-  analyze: async (resumeId) => {
-    return await apiCall(`/api/resumes/${resumeId}/analyze`);
-  },
-};
-
-// Candidates API calls
-export const candidatesAPI = {
-  // Get all candidates
-  getAll: async () => {
-    return await apiCall('/api/candidates/');
-  },
-
-  // Get candidate by ID
-  getById: async (id) => {
-    return await apiCall(`/api/candidates/${id}`);
-  },
-
-  // Create candidate
-  create: async (candidateData) => {
-    return await apiCall('/api/candidates/', {
-      method: 'POST',
-      body: JSON.stringify(candidateData),
-    });
-  },
-
-  // Update candidate
-  update: async (id, candidateData) => {
-    return await apiCall(`/api/candidates/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(candidateData),
-    });
-  },
-
-  // Delete candidate
-  delete: async (id) => {
-    return await apiCall(`/api/candidates/${id}`, {
-      method: 'DELETE',
-    });
-  },
-};
-
-// Health check
-export const healthAPI = {
-  check: async () => {
-    return await apiCall('/health', {
-      includeAuth: false,
-    });
-  },
-};
-
-// Export utilities
-export { getAuthToken, setAuthToken, removeAuthToken, API_BASE_URL };
+// Export API client for other modules
+export { apiClient, APIError };
+export default apiClient;
 

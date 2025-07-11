@@ -1,4 +1,4 @@
-// Complete API client for RecruitAI frontend
+// Complete API client for RecruitAI - FIXED LOGIN VERSION
 // File: src/lib/api.js
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://cleanfilesbackend.onrender.com';
@@ -13,58 +13,42 @@ class APIError extends Error {
 }
 
 class APIClient {
-  constructor() {
-    this.baseURL = API_BASE_URL;
+  constructor(baseURL = API_BASE_URL) {
+    this.baseURL = baseURL;
     this.token = localStorage.getItem('auth_token');
-  }
-
-  setToken(token) {
-    this.token = token;
-    if (token) {
-      localStorage.setItem('auth_token', token);
-    } else {
-      localStorage.removeItem('auth_token');
-    }
-  }
-
-  getHeaders() {
-    const headers = {
-      'Content-Type': 'application/json',
-    };
-
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
-    }
-
-    return headers;
   }
 
   async request(endpoint, options = {}) {
     const url = `${this.baseURL}${endpoint}`;
+    
     const config = {
-      headers: this.getHeaders(),
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
       ...options,
     };
 
-    // Handle FormData (for file uploads)
-    if (options.body instanceof FormData) {
-      delete config.headers['Content-Type'];
+    // Add auth token if available
+    if (this.token) {
+      config.headers.Authorization = `Bearer ${this.token}`;
     }
 
-    console.log(`Making ${config.method || 'GET'} request to: ${url}`);
-
     try {
+      console.log(`Making ${config.method || 'GET'} request to:`, url);
+      
       const response = await fetch(url, config);
-      console.log(`Response status: ${response.status}`);
-
+      console.log('Response status:', response.status);
+      
       let data;
       const contentType = response.headers.get('content-type');
+      
       if (contentType && contentType.includes('application/json')) {
         data = await response.json();
       } else {
         data = await response.text();
       }
-
+      
       console.log('Response data:', data);
 
       if (!response.ok) {
@@ -72,16 +56,16 @@ class APIClient {
         
         if (typeof data === 'object' && data.detail) {
           if (Array.isArray(data.detail)) {
-            errorMessage = data.detail.map(err => err.msg || err.message || err).join(', ');
+            errorMessage = data.detail.map(err => err.msg || err.message || 'Field required').join(', ');
           } else if (typeof data.detail === 'string') {
             errorMessage = data.detail;
-          } else if (typeof data.detail === 'object') {
-            errorMessage = data.detail.message || JSON.stringify(data.detail);
+          } else {
+            errorMessage = data.detail.message || 'Field required';
           }
-        } else if (typeof data === 'object' && data.message) {
-          errorMessage = data.message;
         } else if (typeof data === 'string') {
           errorMessage = data;
+        } else if (data.message) {
+          errorMessage = data.message;
         }
 
         throw new APIError(errorMessage, response.status, data);
@@ -95,11 +79,12 @@ class APIClient {
         throw error;
       }
       
-      if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        throw new APIError('Network error - please check your connection', 0, null);
-      }
-      
-      throw new APIError(error.message || 'Unknown error occurred', 0, null);
+      // Network or other errors
+      throw new APIError(
+        error.message || 'Network error occurred',
+        0,
+        null
+      );
     }
   }
 
@@ -108,11 +93,15 @@ class APIClient {
     try {
       const response = await this.request('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify(credentials),
+        body: JSON.stringify({
+          email: credentials.email || credentials.username_or_email, // FIXED: Use 'email' field
+          password: credentials.password
+        })
       });
 
       if (response.access_token) {
-        this.setToken(response.access_token);
+        this.token = response.access_token;
+        localStorage.setItem('auth_token', this.token);
       }
 
       return response;
@@ -126,11 +115,17 @@ class APIClient {
     try {
       const response = await this.request('/api/auth/register', {
         method: 'POST',
-        body: JSON.stringify(userData),
+        body: JSON.stringify({
+          email: userData.email,
+          password: userData.password,
+          first_name: userData.first_name || userData.firstName,
+          last_name: userData.last_name || userData.lastName
+        })
       });
 
       if (response.access_token) {
-        this.setToken(response.access_token);
+        this.token = response.access_token;
+        localStorage.setItem('auth_token', this.token);
       }
 
       return response;
@@ -141,22 +136,25 @@ class APIClient {
   }
 
   async logout() {
-    this.setToken(null);
+    this.token = null;
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user_data');
     return { success: true };
   }
 
-  // Jobs methods
+  // Dashboard methods
+  async getDashboardOverview() {
+    return this.request('/api/dashboard/overview');
+  }
+
+  async getDashboardStats() {
+    return this.request('/api/dashboard/stats');
+  }
+
+  // Job methods
   async getJobs(params = {}) {
-    const queryParams = new URLSearchParams();
-    Object.keys(params).forEach(key => {
-      if (params[key] !== undefined && params[key] !== null) {
-        queryParams.append(key, params[key]);
-      }
-    });
-
-    const queryString = queryParams.toString();
-    const endpoint = `/api/jobs${queryString ? `?${queryString}` : ''}`;
-
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = queryString ? `/api/jobs?${queryString}` : '/api/jobs';
     return this.request(endpoint);
   }
 
@@ -167,20 +165,20 @@ class APIClient {
   async createJob(jobData) {
     return this.request('/api/jobs', {
       method: 'POST',
-      body: JSON.stringify(jobData),
+      body: JSON.stringify(jobData)
     });
   }
 
   async updateJob(jobId, jobData) {
     return this.request(`/api/jobs/${jobId}`, {
       method: 'PUT',
-      body: JSON.stringify(jobData),
+      body: JSON.stringify(jobData)
     });
   }
 
   async deleteJob(jobId) {
     return this.request(`/api/jobs/${jobId}`, {
-      method: 'DELETE',
+      method: 'DELETE'
     });
   }
 
@@ -188,18 +186,10 @@ class APIClient {
     return this.request(`/api/jobs/${jobId}/applications`);
   }
 
-  // Resumes methods
+  // Resume methods
   async getResumes(params = {}) {
-    const queryParams = new URLSearchParams();
-    Object.keys(params).forEach(key => {
-      if (params[key] !== undefined && params[key] !== null) {
-        queryParams.append(key, params[key]);
-      }
-    });
-
-    const queryString = queryParams.toString();
-    const endpoint = `/api/resumes${queryString ? `?${queryString}` : ''}`;
-
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = queryString ? `/api/resumes?${queryString}` : '/api/resumes';
     return this.request(endpoint);
   }
 
@@ -207,127 +197,128 @@ class APIClient {
     return this.request(`/api/resumes/${resumeId}`);
   }
 
-  async uploadResume(file, jobId = null) {
+  async uploadResume(file, metadata = {}) {
     const formData = new FormData();
     formData.append('file', file);
-    if (jobId) {
-      formData.append('job_id', jobId);
-    }
+    
+    // Add metadata
+    Object.keys(metadata).forEach(key => {
+      formData.append(key, metadata[key]);
+    });
 
     return this.request('/api/resumes/upload', {
       method: 'POST',
-      body: formData,
+      headers: {
+        // Don't set Content-Type for FormData, let browser set it
+        ...(this.token && { Authorization: `Bearer ${this.token}` })
+      },
+      body: formData
     });
   }
 
-  async bulkUploadResumes(files, jobId = null) {
+  async bulkUploadResumes(files, metadata = {}) {
     const formData = new FormData();
-    files.forEach(file => {
+    
+    // Add multiple files
+    files.forEach((file, index) => {
       formData.append('files', file);
     });
-    if (jobId) {
-      formData.append('job_id', jobId);
-    }
+    
+    // Add metadata
+    Object.keys(metadata).forEach(key => {
+      formData.append(key, metadata[key]);
+    });
 
     return this.request('/api/resumes/bulk-upload', {
       method: 'POST',
-      body: formData,
+      headers: {
+        // Don't set Content-Type for FormData, let browser set it
+        ...(this.token && { Authorization: `Bearer ${this.token}` })
+      },
+      body: formData
     });
   }
 
   async deleteResume(resumeId) {
     return this.request(`/api/resumes/${resumeId}`, {
-      method: 'DELETE',
+      method: 'DELETE'
     });
   }
 
-  async getResumeMatches(resumeId) {
-    return this.request(`/api/resumes/${resumeId}/matches`);
+  async getResumeMatches(resumeId, params = {}) {
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = queryString ? 
+      `/api/resumes/${resumeId}/matches?${queryString}` : 
+      `/api/resumes/${resumeId}/matches`;
+    return this.request(endpoint);
   }
 
   async reprocessResume(resumeId) {
     return this.request(`/api/resumes/${resumeId}/reprocess`, {
-      method: 'POST',
+      method: 'POST'
     });
-  }
-
-  // Dashboard methods
-  async getDashboardStats() {
-    return this.request('/api/dashboard/stats');
-  }
-
-  async getDashboardOverview() {
-    return this.request('/api/dashboard/overview');
   }
 
   // Search methods
   async searchCandidates(params = {}) {
-    const queryParams = new URLSearchParams();
-    Object.keys(params).forEach(key => {
-      if (params[key] !== undefined && params[key] !== null) {
-        queryParams.append(key, params[key]);
-      }
-    });
-
-    const queryString = queryParams.toString();
-    const endpoint = `/api/search${queryString ? `?${queryString}` : ''}`;
-
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = queryString ? `/api/search?${queryString}` : '/api/search';
     return this.request(endpoint);
   }
 
-  // Health check methods
-  async getHealth() {
+  // Health check
+  async healthCheck() {
     return this.request('/health');
   }
 
-  async getStatus() {
+  async getApiStatus() {
     return this.request('/api/status');
   }
 }
 
-// Create and export API instance
-const api = new APIClient();
+// Create API client instance
+const apiClient = new APIClient();
 
-// Export individual methods for convenience
+// Export individual API modules for better organization
 export const auth = {
-  login: (credentials) => api.login(credentials),
-  register: (userData) => api.register(userData),
-  logout: () => api.logout(),
-};
-
-export const jobs = {
-  getAll: (params) => api.getJobs(params),
-  getById: (id) => api.getJob(id),
-  create: (data) => api.createJob(data),
-  update: (id, data) => api.updateJob(id, data),
-  delete: (id) => api.deleteJob(id),
-  getApplications: (id) => api.getJobApplications(id),
-};
-
-export const resumes = {
-  getAll: (params) => api.getResumes(params),
-  getById: (id) => api.getResume(id),
-  upload: (file, jobId) => api.uploadResume(file, jobId),
-  bulkUpload: (files, jobId) => api.bulkUploadResumes(files, jobId),
-  delete: (id) => api.deleteResume(id),
-  getMatches: (id) => api.getResumeMatches(id),
-  reprocess: (id) => api.reprocessResume(id),
+  login: (credentials) => apiClient.login(credentials),
+  register: (userData) => apiClient.register(userData),
+  logout: () => apiClient.logout()
 };
 
 export const dashboard = {
-  getStats: () => api.getDashboardStats(),
-  getOverview: () => api.getDashboardOverview(),
+  getOverview: () => apiClient.getDashboardOverview(),
+  getStats: () => apiClient.getDashboardStats()
+};
+
+export const jobs = {
+  getAll: (params) => apiClient.getJobs(params),
+  getById: (id) => apiClient.getJob(id),
+  create: (data) => apiClient.createJob(data),
+  update: (id, data) => apiClient.updateJob(id, data),
+  delete: (id) => apiClient.deleteJob(id),
+  getApplications: (id) => apiClient.getJobApplications(id)
+};
+
+export const resumes = {
+  getAll: (params) => apiClient.getResumes(params),
+  getById: (id) => apiClient.getResume(id),
+  upload: (file, metadata) => apiClient.uploadResume(file, metadata),
+  bulkUpload: (files, metadata) => apiClient.bulkUploadResumes(files, metadata),
+  delete: (id) => apiClient.deleteResume(id),
+  getMatches: (id, params) => apiClient.getResumeMatches(id, params),
+  reprocess: (id) => apiClient.reprocessResume(id)
 };
 
 export const search = {
-  candidates: (params) => api.searchCandidates(params),
+  candidates: (params) => apiClient.searchCandidates(params)
 };
 
-export const system = {
-  health: () => api.getHealth(),
-  status: () => api.getStatus(),
+export const health = {
+  check: () => apiClient.healthCheck(),
+  status: () => apiClient.getApiStatus()
 };
 
-// Export the main API client
-export default api;
+// Export the main client for direct access if needed
+export default apiClient;
 

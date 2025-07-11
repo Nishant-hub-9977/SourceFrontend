@@ -1,8 +1,5 @@
-// Enhanced Authentication Context with proper error handling
-// File: src/contexts/AuthContext.jsx
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { authAPI } from '../lib/api';
+import { auth } from '../lib/api';
 
 const AuthContext = createContext();
 
@@ -19,64 +16,51 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Clear error after 5 seconds
   useEffect(() => {
-    if (error) {
-      const timer = setTimeout(() => {
-        setError(null);
-      }, 5000);
-      return () => clearTimeout(timer);
+    // Check if user is already logged in
+    const token = localStorage.getItem('auth_token');
+    const userData = localStorage.getItem('user_data');
+    
+    if (token && userData) {
+      try {
+        setUser(JSON.parse(userData));
+      } catch (e) {
+        console.error('Error parsing user data:', e);
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_data');
+      }
     }
-  }, [error]);
-
-  // Check if user is logged in on app start
-  useEffect(() => {
-    checkAuthStatus();
+    setLoading(false);
   }, []);
-
-  const checkAuthStatus = async () => {
-    try {
-      const token = localStorage.getItem('access_token');
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-
-      const result = await authAPI.getCurrentUser();
-      if (result.success) {
-        setUser(result.data);
-      } else {
-        // Token might be expired, clear it
-        localStorage.removeItem('access_token');
-        setUser(null);
-      }
-    } catch (error) {
-      console.error('Auth check failed:', error);
-      localStorage.removeItem('access_token');
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const login = async (credentials) => {
     try {
       setLoading(true);
       setError(null);
-
-      const result = await authAPI.login(credentials);
       
-      if (result.success) {
-        setUser(result.data.user);
-        setError(null);
-        return { success: true, message: result.message };
+      console.log('Attempting login with:', credentials);
+      
+      const response = await auth.login(credentials);
+      console.log('Login response:', response);
+      
+      if (response.access_token) {
+        const userData = {
+          email: credentials.email,
+          first_name: response.user?.first_name || 'User',
+          last_name: response.user?.last_name || '',
+          id: response.user?.id || 'user_001'
+        };
+        
+        setUser(userData);
+        localStorage.setItem('user_data', JSON.stringify(userData));
+        
+        return { success: true, user: userData };
       } else {
-        const errorMessage = result.error || 'Login failed. Please try again.';
-        setError(errorMessage);
-        return { success: false, error: errorMessage };
+        throw new Error(response.message || 'Login failed');
       }
     } catch (error) {
-      const errorMessage = error.message || 'An unexpected error occurred during login.';
+      console.error('Login error:', error);
+      const errorMessage = error.message || 'Login failed. Please try again.';
       setError(errorMessage);
       return { success: false, error: errorMessage };
     } finally {
@@ -88,29 +72,30 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
-
-      const result = await authAPI.register(userData);
       
-      if (result.success) {
-        // After successful registration, automatically log in
-        const loginResult = await authAPI.login({
-          username_or_email: userData.email,
-          password: userData.password
-        });
+      console.log('Attempting registration with:', userData);
+      
+      const response = await auth.register(userData);
+      console.log('Registration response:', response);
+      
+      if (response.access_token) {
+        const newUser = {
+          email: userData.email,
+          first_name: userData.first_name || 'User',
+          last_name: userData.last_name || '',
+          id: response.user?.id || 'user_001'
+        };
         
-        if (loginResult.success) {
-          setUser(loginResult.data.user);
-        }
+        setUser(newUser);
+        localStorage.setItem('user_data', JSON.stringify(newUser));
         
-        setError(null);
-        return { success: true, message: result.message };
+        return { success: true, user: newUser };
       } else {
-        const errorMessage = result.error || 'Registration failed. Please try again.';
-        setError(errorMessage);
-        return { success: false, error: errorMessage };
+        throw new Error(response.message || 'Registration failed');
       }
     } catch (error) {
-      const errorMessage = error.message || 'An unexpected error occurred during registration.';
+      console.error('Registration error:', error);
+      const errorMessage = error.message || 'Registration failed. Please try again.';
       setError(errorMessage);
       return { success: false, error: errorMessage };
     } finally {
@@ -120,19 +105,13 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      setLoading(true);
-      await authAPI.logout();
-      setUser(null);
-      setError(null);
-      return { success: true, message: 'Logged out successfully' };
+      await auth.logout();
     } catch (error) {
       console.error('Logout error:', error);
-      // Even if logout fails, clear local state
-      setUser(null);
-      setError(null);
-      return { success: true, message: 'Logged out successfully' };
     } finally {
-      setLoading(false);
+      setUser(null);
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user_data');
     }
   };
 
@@ -148,7 +127,7 @@ export const AuthProvider = ({ children }) => {
     register,
     logout,
     clearError,
-    isAuthenticated: !!user,
+    isAuthenticated: !!user
   };
 
   return (

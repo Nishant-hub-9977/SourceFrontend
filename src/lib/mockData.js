@@ -1,3 +1,6 @@
+
+
+
 const mockData = {
   users: [
     {
@@ -141,6 +144,126 @@ const mockData = {
   },
 };
 
+export const mockUtils = {
+  delay: (ms) => new Promise(res => setTimeout(res, ms)),
+  generateUserId: () => `user_${Math.random().toString(36).substr(2, 9)}`,
+  generateJobId: () => `job_${Math.random().toString(36).substr(2, 9)}`,
+  generateResumeId: () => `resume_${Math.random().toString(36).substr(2, 9)}`,
+  findUser: (email, password) => {
+    const user = mockData.users.find(u => u.email === email);
+    if (user && user.password === password) {
+      return user;
+    }
+    return null;
+  },
+  generateMatchScore: (resume, job) => {
+    const resumeSkills = new Set(resume.skills.map(s => s.toLowerCase()));
+    const jobSkills = new Set(job.skills.map(s => s.toLowerCase()));
+    const commonSkills = [...resumeSkills].filter(skill => jobSkills.has(skill));
+    const skillMatch = (commonSkills.length / jobSkills.size) * 100;
+    
+    const experienceMatch = Math.min(100, (resume.experience_years / 5) * 100); // Assuming 5 years is ideal
+    
+    return Math.round((skillMatch * 0.7) + (experienceMatch * 0.3));
+  }
+};
+
+export const mockApiResponses = {
+  login_success: {
+    access_token: 'mock_access_token',
+    refresh_token: 'mock_refresh_token',
+    token_type: 'bearer',
+    expires_in: 3600,
+    user: {
+      id: 'mock_user_id',
+      email: 'mock@example.com',
+      username: 'mockuser',
+      full_name: 'Mock User',
+      company_name: 'Mock Corp',
+      role: 'admin',
+    },
+  },
+  register_success: {
+    message: 'Registration successful (mock)',
+    user: {
+      id: 'mock_new_user_id',
+      email: 'new@example.com',
+      username: 'newuser',
+      full_name: 'New User',
+      company_name: 'New Corp',
+      role: 'candidate',
+    },
+  },
+  jobs_list: {
+    jobs: mockData.jobs,
+    total: mockData.jobs.length,
+    skip: 0,
+    limit: 100,
+    has_more: false,
+  },
+  job_created: {
+    message: 'Job created successfully (mock)',
+    job: {},
+  },
+  job_updated: {
+    message: 'Job updated successfully (mock)',
+    job: {},
+  },
+  job_deleted: {
+    success: true,
+    message: 'Job deleted successfully (mock)',
+  },
+  resumes_list: {
+    resumes: mockData.resumes,
+    total: mockData.resumes.length,
+    skip: 0,
+    limit: 100,
+    has_more: false,
+  },
+  resume_uploaded: {
+    success: true,
+    message: 'Resume uploaded successfully (mock)',
+    resume: {},
+  },
+  bulk_upload_success: {
+    success: true,
+    summary: {
+      total_files: 0,
+      successful_uploads: 0,
+      failed_uploads: 0,
+      processing_time: '0s',
+    },
+    results: [],
+  },
+  resume_matches: {
+    matches: [],
+    total_matches: 0,
+    total_resumes: 0,
+    job_description_preview: '',
+    matching_criteria: {},
+  },
+  health_check: {
+    status: 'healthy',
+    service: 'frontend_mock',
+    timestamp: new Date().toISOString(),
+    message: 'Frontend is operating in mock data mode.',
+  },
+  api_status: {
+    api_version: '3.0.0',
+    status: 'operational (mock)',
+    timestamp: new Date().toISOString(),
+    endpoints: {},
+    demo_credentials: {
+      admin: 'admin@recruitai.com / password123',
+      recruiter: 'recruiter@recruitai.com / password123',
+      candidate: 'candidate@recruitai.com / password123',
+    },
+    features: {
+      authentication: 'Mock JWT',
+      file_processing: 'Simulated',
+      ai_matching: 'Simulated TF-IDF',
+    },
+  },
+};
+
 export default mockData;
-
-

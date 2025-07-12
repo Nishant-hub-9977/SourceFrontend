@@ -1,8 +1,12 @@
+
+
+
 // Bulletproof API Client with Fallback System
 // File: src/lib/api.js
 // Version: 3.0.0 - Client-Ready with Offline Support
 
-import mockData, { mockUtils, mockApiResponses } from './mockData.js';
+import mockData from './mockData.js';
+import { mockUtils, mockApiResponses } from './mockData.js';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://cleanfilesbackend.onrender.com';
 
@@ -11,7 +15,7 @@ const CONFIG = {
   // Enable fallback mode when backend is unavailable
   ENABLE_FALLBACK: true,
   
-  // Timeout for API requests (ms )
+  // Timeout for API requests (ms)
   REQUEST_TIMEOUT: 10000,
   
   // Number of retry attempts
@@ -613,7 +617,7 @@ class APIClient {
         return true;
       }
     } catch (error) {
-      logError('Token refresh failed, switching to fallback', error);
+      logError('Token refresh failed, continuing with local logout', error);
       this.fallbackMode = true;
       TokenManager.setFallbackMode(true);
       return true; // Fallback mode always succeeds
@@ -1137,7 +1141,8 @@ export const utils = {
   },
 
   isValidEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[^
+\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
   },
 
@@ -1226,4 +1231,3 @@ if (isDevelopment) {
 
 // Initialize connection status on load
 apiClient.initialize();
-

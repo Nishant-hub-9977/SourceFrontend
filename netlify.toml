@@ -27,6 +27,12 @@
     
     # Skip preflight check for faster builds
     SKIP_PREFLIGHT_CHECK = "true"
+    
+    # API base URL for your backend
+    VITE_API_BASE_URL = "https://cleanfilesbackend.onrender.com"
+    
+    # React app context
+    REACT_APP_NETLIFY_CONTEXT = "production"
 
 # SPA (Single Page Application) redirect rules
 # This ensures all routes work properly in React Router
@@ -63,9 +69,6 @@
   [headers.values]
     # Cache static assets for 1 year
     Cache-Control = "public, max-age=31536000, immutable"
-    
-    # Add compression
-    Content-Encoding = "gzip"
 
 # Cache JavaScript and CSS files
 [[headers]]
@@ -150,10 +153,6 @@
 [build.processing.images]
   compress = true
 
-# Functions directory (for future use if needed)
-[functions]
-  directory = "netlify/functions"
-
 # Development settings
 [dev]
   command = "npm start"
@@ -171,16 +170,6 @@
 [context.branch-deploy]
   command = "npm run build"
 
-# Plugin configurations (optional but useful)
-[[plugins]]
-  package = "@netlify/plugin-lighthouse"
-  
-  [plugins.inputs.thresholds]
-    performance = 0.8
-    accessibility = 0.9
-    best-practices = 0.9
-    seo = 0.9
-
 # Error pages
 [[redirects]]
   from = "/404"
@@ -194,8 +183,4 @@
   status = 200
   force = false
   headers = {X-From = "Netlify"}
-
-# Prerender settings for better SEO (optional)
-[build.environment.REACT_APP_NETLIFY_CONTEXT]
-  value = "production"
 
